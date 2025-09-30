@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import z from "zod";
 
 // Minimal jj stub implementing: log, bookmark list/set, git push
 // State format:
@@ -10,11 +11,13 @@ import { existsSync } from "node:fs";
 //   bases: { "11111111": "main" }
 // }
 
-type JJState = {
-  revsets: Record<string, string[]>;
-  bookmarks: Record<string, string>;
-  bases: Record<string, string>;
-};
+const jjState = z.object({
+  revsets: z.record(z.string(), z.array(z.string())),
+  bookmarks: z.record(z.string(), z.string()),
+  bases: z.record(z.string(), z.string()),
+});
+
+export type JJState = z.infer<typeof jjState>;
 
 const statePathEnv = process.env.JJ_STUB_STATE ?? "";
 if (!statePathEnv) {
@@ -24,10 +27,17 @@ if (!statePathEnv) {
 const statePath: string = statePathEnv;
 
 async function load(file: string): Promise<JJState> {
-  if (!existsSync(file)) return { revsets: { "@": [] }, bookmarks: {}, bases: {} };
-  const raw = await readFile(file, "utf8");
-  return raw.trim() ? JSON.parse(raw) : { revsets: { "@": [] }, bookmarks: {}, bases: {} };
+  try {
+    if (!existsSync(file)) throw new Error("file does not exist");
+    const raw = await readFile(file, "utf8");
+    const trimmed = raw.trim();
+    if (!trimmed) throw new Error("empty file");
+    return jjState.parse(JSON.parse(trimmed));
+  } catch (e) {
+    return { revsets: { "@": [] }, bookmarks: {}, bases: {} };
+  }
 }
+
 async function save(file: string, state: JJState) {
   await writeFile(file, JSON.stringify(state, null, 2));
 }
@@ -37,7 +47,7 @@ function flag(args: string[], name: string): string | undefined {
 }
 function closestBookmarkSpecToId(spec: string): string | null {
   const m = spec.match(/^closest_bookmark\((.+)-\)$/);
-  return m ? m[1] : null;
+  return m?.[1] ?? null;
 }
 
 const args = process.argv.slice(2);
@@ -52,7 +62,7 @@ if (args[0] === "log") {
   let revset = flag(args, "-r") || "@";
   // Support patterns like "@ & mutable()" and trim spaces
   const m = revset.match(/^(.*)\s*&\s*mutable\(\)\s*$/);
-  if (m) revset = m[1];
+  revset = m?.[1] ?? revset;
   revset = revset.trim();
   const ids = state.revsets[revset] || [];
   process.stdout.write(ids.join("\n") + (ids.length ? "\n" : ""));

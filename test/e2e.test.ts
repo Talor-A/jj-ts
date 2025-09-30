@@ -2,6 +2,8 @@ import { test, expect } from "bun:test";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import type { JJState } from "./stubs/jj";
+import type { GHState } from "./stubs/gh";
 
 const root = path.resolve(path.join(import.meta.dir!, ".."));
 const stubsDir = path.join(root, "test", "stubs");
@@ -12,7 +14,7 @@ async function tmpdir(prefix: string) {
   return await mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
-async function runOnce(jjState: unknown, ghState: unknown) {
+async function runOnce(jjState: JJState, ghState: GHState) {
   const dir = await tmpdir("jjts-");
   const jjPath = path.join(dir, "jj.json");
   const ghPath = path.join(dir, "gh.json");
@@ -50,7 +52,9 @@ test("creates a new PR for a commit without head bookmark", async () => {
   expect(stderr).toBe("");
   expect(stdout).toContain("PR Stack:");
   expect(stdout).toContain("Creating new PR for feature/11111111 -> main");
-  expect(stdout).toContain("# 1 Draft: feature/11111111 feature/11111111 -> main (new)");
+  expect(stdout).toContain(
+    "# 1 Draft: feature/11111111 feature/11111111 -> main (new)"
+  );
 });
 
 test("updates base when PR exists with different base", async () => {
@@ -60,10 +64,19 @@ test("updates base when PR exists with different base", async () => {
     bases: { "22222222": "feature/11111111" },
   };
   const ghState = {
-    prs: [{ number: 1, title: "Existing", headRefName: "feature/22222222", baseRefName: "main" }],
+    prs: [
+      {
+        number: 1,
+        title: "Existing",
+        headRefName: "feature/22222222",
+        baseRefName: "main",
+      },
+    ],
     nextNumber: 2,
   };
   const { stdout, stderr } = await runOnce(jjState, ghState);
   expect(stderr).toBe("");
-  expect(stdout).toContain("# 1 Existing feature/22222222 -> feature/11111111 (updated)");
+  expect(stdout).toContain(
+    "# 1 Existing feature/22222222 -> feature/11111111 (updated)"
+  );
 });

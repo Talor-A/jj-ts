@@ -1,13 +1,24 @@
 #!/usr/bin/env bun
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import z from "zod";
 
 // Minimal gh stub implementing: pr list|create|edit
 // State format:
 // { prs: [{ number, title, headRefName, baseRefName }], nextNumber: 1 }
 
-type PR = { number: number; title: string; headRefName: string; baseRefName: string };
-interface GHState { prs: PR[]; nextNumber: number }
+const prSchema = z.object({
+  number: z.number(),
+  title: z.string(),
+  headRefName: z.string(),
+  baseRefName: z.string(),
+});
+
+const ghState = z.object({ prs: z.array(prSchema), nextNumber: z.number() });
+
+type PR = z.infer<typeof prSchema>;
+
+export type GHState = z.infer<typeof ghState>;
 
 const statePathEnv = process.env.GH_STUB_STATE ?? "";
 if (!statePathEnv) {
@@ -19,8 +30,12 @@ const statePath: string = statePathEnv;
 async function load(file: string): Promise<GHState> {
   if (!existsSync(file)) return { prs: [], nextNumber: 1 };
   const raw = await readFile(file, "utf8");
-  return raw.trim() ? JSON.parse(raw) : { prs: [], nextNumber: 1 };
+  if (!raw.trim()) throw new Error("empty file");
+
+  const parsed = JSON.parse(raw);
+  return ghState.parse(parsed);
 }
+
 async function save(file: string, state: GHState) {
   await writeFile(file, JSON.stringify(state, null, 2));
 }
@@ -62,7 +77,9 @@ if (sub === "list") {
     });
     process.stdout.write(JSON.stringify(arr));
   } else {
-    process.stdout.write(results.map((p) => `#${p.number} ${p.title}`).join("\n"));
+    process.stdout.write(
+      results.map((p) => `#${p.number} ${p.title}`).join("\n")
+    );
   }
   process.exit(0);
 }

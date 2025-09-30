@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 
 import { $ } from "bun";
+import { z } from "zod";
+import { assert } from "./lib/assert";
 
 async function jjPr(revset: string) {
   // Push all changes in the revset
@@ -25,6 +27,15 @@ async function jjPr(revset: string) {
     currentBase?: string;
     status?: string;
   }
+
+  // Zod schemas for parsing GitHub CLI JSON output
+  const prItemSchema = z.object({
+    number: z.number(),
+    title: z.string(),
+    baseRefName: z.string(),
+  });
+
+  const prListSchema = z.array(prItemSchema);
 
   const prInfo = new Map<string, PrInfo>();
 
@@ -54,10 +65,12 @@ async function jjPr(revset: string) {
 
     // Check if PR already exists
     const prListOutput = await $`gh pr list --head ${headBranch} --json number,title,baseRefName`.text();
-    const prList = JSON.parse(prListOutput || "[]");
+    const prList = prListSchema.parse(JSON.parse(prListOutput || "[]"));
 
     if (prList.length > 0) {
       const prData = prList[0];
+      assert(prData, "PR data should exist");
+
       info.number = prData.number.toString();
       info.title = prData.title;
       info.currentBase = prData.baseRefName;
@@ -76,9 +89,11 @@ async function jjPr(revset: string) {
 
       // Get the PR number after creation
       const newPrListOutput = await $`gh pr list --head ${headBranch} --json number,title`.text();
-      const newPrList = JSON.parse(newPrListOutput || "[]");
+      const newPrList = prListSchema.parse(JSON.parse(newPrListOutput || "[]"));
 
       if (newPrList.length > 0) {
+        assert(newPrList[0], "New PR data should exist");
+        
         info.number = newPrList[0].number.toString();
         info.title = newPrList[0].title;
         info.status = "new";

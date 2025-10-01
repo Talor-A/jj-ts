@@ -19,37 +19,7 @@ const prItemLiteSchema = z.object({
 });
 const prListLiteSchema = z.array(prItemLiteSchema);
 
-export async function computeGitPushBookmark( commitId: string) {
-  try {
-    const out =
-      await $`${JJ} log --no-graph --revision ${commitId} --template git_push_bookmark`.text();
-    const s = out.trim();
-    if (s) return s;
-  } catch {}
-  return `push-${commitId.substring(0, 12)}`;
-}
 
-async function pushChangeResilient(changeID: string) {
-  const base = await computeGitPushBookmark(changeID);
-  for (let i = 0; i < 20; i++) {
-    const suffix = i === 0 ? "" : `-${i + 1}`;
-    const candidate = `${base}${suffix}`;
-    try {
-      /**
-         --named <NAME=REVISION>
-          Specify a new bookmark name and a revision to push under that name, e.g. '--named myfeature=@'
-
-          Does not require --allow-new.
-       */
-      await $`${JJ} git push --named ${candidate}=${changeID}`;
-      return candidate;
-    } catch (err) {
-      // Try next suffix on any failure (e.g., name collision)
-      continue;
-    }
-  }
-  throw new Error(`Unable to push change ${changeID} with a unique name`);
-}
 
 export interface JJPROpts {
   GH: string; // Path to gh binary
@@ -57,21 +27,15 @@ export interface JJPROpts {
 }
 
 export async function jjPr( revset: string) {
-  // Best effort: avoid bulk change-based push which can collide with
-  // template-based bookmark names. We'll push per-commit head branches instead.
-
-  console.log("PR Stack:");
-  console.log("---------");
-
+  
   // Get all mutable commits in the revset (pass revset with '&' as one arg)
   const revArg = `${revset} & mutable()`;
-  const commits =
-    await $`${JJ} log --no-graph -r ${revArg} -T change_id`.text();
-  const commitIds = commits
-    .trim()
-    .split("\n")
-    .filter((id) => id.length > 0);
-
+  const changeIds =
+  (await $`${JJ} log --no-graph -r ${revArg} -T change_id`.text())
+  .trim()
+  .split("\n")
+  .filter((id) => id.length > 0);
+  
   // Store PR information
   interface PrInfo {
     head: string;
@@ -82,26 +46,48 @@ export async function jjPr( revset: string) {
     status?: string;
   }
 
+  if(changeIds.length === 0) {
+    console.log("No mutable commits found in the specified revset.");
+    return;
+  }
+  
+  console.log("PR Stack:");
+  console.log("---------");
   const prInfo = new Map<string, PrInfo>();
 
-  for (const commitId of commitIds) {
+  let changeIdToBranch = new Map<string,string>();
+
+  for (const changeId of changeIds) {
     // Get the head bookmark name
-    let headBranch = await $`${JJ} bookmark list -r ${commitId} -T name`.text();
+    let headBranch = await $`${JJ} bookmark list -r ${changeId} -T 'name ++ "\n"'`.text();
     headBranch = headBranch.trim();
 
-    if (!headBranch) {
-      // Create a bookmark for this commit if none exists
-      headBranch = `feature/${commitId.substring(0, 8)}`;
-      await $`${JJ} bookmark set ${headBranch} -r ${commitId}`;
-      // Push resiliently to avoid name collisions with template-based bookmarks
-      await pushChangeResilient(commitId);
+    if(headBranch.split("\n").length > 1) {
+      console.warn(`Warning: Multiple bookmarks found for commit ${changeId}. Using the first one.`);
+      headBranch = headBranch.split("\n")[0]!
     }
 
+    
+    if (!headBranch) {
+      // Create a bookmark for this commit if none exists
+      headBranch = `feature/${Math.random().toString(36).substring(2, 8)}`;
+      await $`${JJ} bookmark set ${headBranch} -r ${changeId}`;
+      // Push resiliently to avoid name collisions with template-based bookmarks
+    }
+    changeIdToBranch.set(changeId, headBranch);
+  }
+  if(changeIdToBranch.size === 0)  {
+    console.log("No branches to push.");
+    return;
+  }
+  await $`${JJ} git push ${[...changeIdToBranch.values()].flatMap(b => ["-r", b])} --allow-new`;
+
+  for (const [changeId, headBranch] of changeIdToBranch.entries()) {
     // Get base branch
     // Ask for the closest bookmark (parent) for this commit
-    const closestArg = `closest_bookmark(${commitId}-)`;
+    const closestArg = `closest_bookmark(${changeId}-)`;
     const baseBranches =
-      await $`${JJ} bookmark list -r ${closestArg} -T name`.text();
+      await $`${JJ} bookmark list -r ${closestArg} -T 'name ++ "\n"'`.text();
     let baseBranch = baseBranches.trim().split("\n")[0] || "main";
 
     // Initialize PR info for this commit
@@ -151,7 +137,7 @@ export async function jjPr( revset: string) {
       }
     }
 
-    prInfo.set(commitId, info);
+    prInfo.set(changeId, info);
 
     // Print the PR information
     const number = info.number || "ERROR";

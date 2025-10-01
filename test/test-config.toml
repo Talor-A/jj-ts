@@ -1,0 +1,8 @@
+"$schema" = "https://jj-vcs.github.io/jj/latest/config-schema.json"
+
+[user]
+name = "Test User"
+email = "testuser@example.com"
+
+[template-aliases]
+'git_push_bookmark' = '"test-user/push/" ++ change_id.short()'

@@ -38,7 +38,7 @@ afterEach(() => {
     cleanupDirs = [];
 })
 
-async function runOnce(ghState: GHState, revset:string) {
+async function runOnce(cwd:string, ghState: GHState, revset:string) {
   const dir = await tmpdir("jjts-");
   const ghPath = path.join(dir, "gh.json");
 
@@ -50,8 +50,10 @@ async function runOnce(ghState: GHState, revset:string) {
     GH_BIN: `bun ${ghStub}`,
   };
 
-  const p = Bun.spawn(["bun", "run", "index.ts", revset], {
-    cwd: root,
+  const p = Bun.spawn(["bun", "run", 
+    
+    path.resolve(root,"index.ts"), revset], {
+    cwd,
     env,
     stdout: "pipe",
     stderr: "pipe",
@@ -59,6 +61,9 @@ async function runOnce(ghState: GHState, revset:string) {
   await p.exited;
   const stdout = await new Response(p.stdout).text();
   const stderr = await new Response(p.stderr).text();
+
+  console.log("STDOUT:", stdout);
+    console.log("STDERR:", stderr);
   return { stdout, stderr };
 }
     
@@ -123,19 +128,19 @@ describe("single PR", () => {
         await $`jj -R ${repoDir} --config-file ${testJjConfigPath} desc -m "made a change"`;
         await $`jj -R ${repoDir} --config-file ${testJjConfigPath} new`;
 
-       const {stderr, stdout}= await runOnce({ nextNumber:1, prs:[]}, "@-");
 
-         expect(stderr).toBe("");   
-         expect(stdout).toMatchInlineSnapshot(`
-           "PR Stack:
-           ---------
-           "
-         `)
+       const {stderr, stdout}= await runOnce(
+        repoDir,
+        { nextNumber:1, prs:[]}, "@-");
 
-         expect(await $`jj -R ${repoDir} --config-file ${testJjConfigPath} bookmark list`.text()).toMatchInlineSnapshot(`
-           "main: wvrurqpr c832d2d7 initial commit
-           "
-         `)
+         expect(stderr).toMatch(
+            /^Created 1 bookmarks pointing to \w+ \w+ push\/gen\-\w+ \| made a change\nChanges to push to origin:\n  Add bookmark push\/gen\-\w+ to \w+\n$/
+         );   
+         expect(stdout).toMatch(/^PR Stack:\n---------\nCreating new PR for push\/gen-\w+ -> main\ncreated #1\n# 1 Draft: push\/gen-\w+ push\/gen-\w+ \-\> main \(new\)\n$/)
+
+         expect(await $`jj -R ${repoDir} --config-file ${testJjConfigPath} bookmark list`.text()).toMatch(
+        /^main: \w+ \w+ initial commit\npush\/gen-\w+: \w+ \w+ made a change\n$/
+         )
     })
 
 

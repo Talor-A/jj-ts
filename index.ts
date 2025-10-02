@@ -128,6 +128,34 @@ export async function jjPr(revset: string) {
   }
 }
 
+interface RevisionInfo {
+  changeId: string;
+  parents: string[];
+  children: string[];
+}
+
+export async function getRevisionGraph(revset: string): Promise<RevisionInfo[]> {
+  // Get all change IDs in the revset
+  const changeIdsStr = await $`${JJ} log --no-graph -r ${revset} -T change_id`.text();
+  const changeIds = changeIdsStr.trim().split("\n").filter(id => id.length > 0);
+
+  const results: RevisionInfo[] = [];
+
+  for (const changeId of changeIds) {
+    // Get parents for this specific revision
+    const parentsStr = await $`${JJ} log --no-graph -r ${changeId} -T 'parents.map(|c| c.change_id()).join("\\n")'`.text();
+    const parents = parentsStr.trim().split("\n").filter(id => id.length > 0);
+
+    // Get children for this specific revision
+    const childrenStr = await $`${JJ} log --no-graph -r 'children(${changeId})' -T change_id`.text();
+    const children = childrenStr.trim().split("\n").filter(id => id.length > 0);
+
+    results.push({ changeId, parents, children });
+  }
+
+  return results;
+}
+
 if (require.main === module) {
   // Get revset from command line arguments (default to @)
   const revset = process.argv[2] || "@";

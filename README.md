@@ -99,3 +99,4 @@ What the tests cover:
 - Tests: `test/e2e.test.ts`, stubs under `test/stubs/`
 
 Contributions to improve the PR inference or add more test scenarios are welcome.
+1
